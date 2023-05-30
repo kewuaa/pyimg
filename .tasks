@@ -1,0 +1,6 @@
+[project-build]
+command=python <root>/setup.py build_ext
+cwd=<root>
+
+[file-build]
+command=cython -3 -a $(VIM_FILEPATH) && explorer $(VIM_PATHNOEXT).html

@@ -58,13 +58,15 @@ cdef void _rgb2gray(ImageC3 img, double[:, ::1] gray) noexcept nogil:
 cdef void _special_filter(
     ImageC1 img,
     double[:, ::1] out,
-    Kernel kernel
+    Kernel kernel,
+    bint norm
 ) noexcept:
     """空域滤波器。
 
     :param img: 待滤波图像
-    :param kernel: 滤波核
     :param out: 保存结果的内存视图
+    :param kernel: 滤波核
+    :param norm: 是否归一化
     """
 
     cdef size_t rows = img.shape[0]
@@ -87,6 +89,7 @@ cdef void _special_filter(
     cdef cdouble[:, ::1] fft_kernel = <cdouble[:shape[0], :shape[1]]>fft_kernel_data
     cdef cdouble* temp = <cdouble*>PyMem_Malloc(size)
     cdef cdouble[:, ::1] temp_view = <cdouble[:shape[0], :shape[1]]>temp
+    cdef double max_, min_, ptp
     cdef size_t i, j
     with nogil:
         # pad img
@@ -108,9 +111,23 @@ cdef void _special_filter(
         _ifft2[cdouble[:, :]](temp_view, fft_img, fft_kernel)
         # slice useful part
         temp_view = fft_img[kernel.shape[0] - 1:rows, kernel.shape[1] - 1:cols]
-        for i in prange(rows - kernel.shape[0] + 1):
-            for j in range(cols - kernel.shape[1] + 1):
-                out[i, j] = temp_view[i, j].real
+        if norm:
+            max_ = min_ = temp_view[0, 0].real
+            for i in range(rows - kernel.shape[0] + 1):
+                for j in range(cols - kernel.shape[1] + 1):
+                    out[i, j] = temp_view[i, j].real
+                    if out[i, j] > max_:
+                        max_ = out[i, j]
+                    if out[i, j] < min_:
+                        min_ = out[i, j]
+            ptp = (max_ - min_) / 255.
+            for i in prange(out.shape[0]):
+                for j in range(out.shape[1]):
+                    out[i, j] = (out[i, j] - min_) / ptp
+        else:
+            for i in prange(rows - kernel.shape[0] + 1):
+                for j in range(cols - kernel.shape[1] + 1):
+                    out[i, j] = temp_view[i, j].real
     PyMem_Free(temp)
     PyMem_Free(fft_kernel_data)
     PyMem_Free(fft_img_data)
@@ -156,7 +173,7 @@ cdef void _guassion_filter(
     )
     cdef double[:, ::1] kernel = <double[:kernel_shape[0], :kernel_shape[1]]>kernel_data
     _init_guassion_kernel(kernel, sigma)
-    _special_filter[ImageC1](img, out, kernel)
+    _special_filter[ImageC1](img, out, kernel, 1)
     PyMem_Free(kernel_data)
 
 
@@ -180,7 +197,7 @@ cdef void _guassion_low_pass(ImageC1 img, double[:, ::1] out, float sigma):
     cdef cdouble* temp_data2 = <cdouble*>PyMem_Malloc(size)
     cdef cdouble[:, ::1] temp2 = <cdouble[:img.shape[0], :img.shape[1]]>temp_data2
     cdef size_t i, j
-    cdef double min_ = 255., max_ = 0., ptp
+    cdef double min_, max_, ptp
     with nogil:
         if ImageC1 is double[:, :]:
             _img = img
@@ -198,6 +215,7 @@ cdef void _guassion_low_pass(ImageC1 img, double[:, ::1] out, float sigma):
                 temp1[i, j] = fft_img[i, j] * kernel[i, j]
         _shift(temp1, temp2)
         _ifft2[cdouble[:, :]](temp1, fft_img, temp2)
+        max_ = min_ = fft_img[0, 0].real
         for i in range(img.shape[0]):
             for j in range(img.shape[1]):
                 out[i, j] = fft_img[i, j].real
@@ -509,8 +527,8 @@ cdef void _canny(
     cdef double[:, ::1] dy = <double[:out.shape[0], :out.shape[1]]>dy_data
     cdef double* temp_data = <double*>PyMem_Malloc(size)
     cdef double[:, ::1] temp = <double[:out.shape[0], :out.shape[1]]>temp_data
-    _special_filter[uint8[:, :]](binary_img, dx, _kernel)
-    _special_filter[uint8[:, :]](binary_img, dy, _kernel.T)
+    _special_filter[uint8[:, :]](binary_img, dx, _kernel, 1)
+    _special_filter[uint8[:, :]](binary_img, dy, _kernel.T, 1)
     cdef double pixel, point1, point2, slope
     cdef size_t k, l
     with nogil:
@@ -553,18 +571,16 @@ cdef void _canny(
                 if pixel <= low_threshold:
                     out[i, j] = 0.
                 elif pixel > high_threshold:
-                    out[i, j] = 1.
+                    out[i, j] = 255.
                 else:
+                    out[i, j] = 0.
                     for k in range(3):
-                        for l in range(3):
-                            if temp[i - 1 + k, j - 1 + l] > high_threshold:
-                                out[i, j] = 1.
-                                break
-                        else:
-                            continue
-                        break
-                    else:
-                        out[i, j] = 0.
+                        l = i - 1 + k
+                        if temp[l, j - 1] > high_threshold or \
+                                temp[l, j] > high_threshold or \
+                                temp[l, j + 1] > high_threshold:
+                            out[i, j] = 255.
+                            break
     PyMem_Free(temp_data)
     PyMem_Free(dy_data)
     PyMem_Free(dx_data)
@@ -605,7 +621,9 @@ cdef (double*, size_t) _hough(
                 if img[j, k] > 0:
                     histongram[
                         i * theta_num
-                        + <size_t>((k * csin(theta) + j * ccos(theta) + r_max) / r_step)
+                        + <size_t>(
+                            (k * csin(theta) + j * ccos(theta) + r_max) / r_step
+                        )
                     ] += 1
     for i in range(size):
         temp[i] = histongram[i]
@@ -613,13 +631,10 @@ cdef (double*, size_t) _hough(
         for j in range(1, r_num - 1):
             v = temp[i * theta_num + j]
             for k in range(3):
-                for l in range(3):
-                    if temp[(i + k) * theta_num + j + l] > v:
-                        histongram[i * theta_num + j] = 0
-                        break
-                else:
-                    continue
-                break
+                l = (i + k) * theta_num + j
+                if temp[l] > v or temp[l + 1] > v or temp[l + 2] > v:
+                    histongram[i * theta_num + j] = 0
+                    break
     free(temp)
     for i in range(theta_num):
         for j in range(r_num):
@@ -658,11 +673,12 @@ def rgb2gray(ImageC3 img) -> cnp.ndarray:
     return out
 
 
-def special_filter(ImageC1 img, Kernel kernel) -> cnp.ndarray:
+def special_filter(ImageC1 img, Kernel kernel, bint norm) -> cnp.ndarray:
     """用于外部调用的空域滤波器。
 
     :param img: 待滤波图像
     :param kernel: 滤波核
+    :param norm: 是否归一化
     :return: 以 numpy 数组形式返回滤波结果
     """
 
@@ -673,7 +689,7 @@ def special_filter(ImageC1 img, Kernel kernel) -> cnp.ndarray:
         sizeof(double) * shape[0] * shape[1]
     )
     cdef double[:, ::1] view = <double[:shape[0], :shape[1]]>data
-    _special_filter[ImageC1](img, view, kernel)
+    _special_filter[ImageC1](img, view, kernel, norm)
     cdef cnp.ndarray out = cnp.PyArray_SimpleNewFromData(
         2, &shape[0], cnp.NPY_FLOAT64, <void*>data
     )

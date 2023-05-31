@@ -4,6 +4,7 @@ from . import fft
 from .core import (
     rgb2gray,
     special_filter,
+    init_guassion_kernel,
     guassion_filter,
     guassion_low_pass,
     nolinear_filter,

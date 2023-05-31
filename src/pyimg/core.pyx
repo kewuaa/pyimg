@@ -59,14 +59,14 @@ cdef void _special_filter(
     ImageC1 img,
     double[:, ::1] out,
     Kernel kernel,
-    bint norm
+    double* range_,
 ) noexcept:
     """空域滤波器。
 
     :param img: 待滤波图像
     :param out: 保存结果的内存视图
     :param kernel: 滤波核
-    :param norm: 是否归一化
+    :param range_: 归一化范围
     """
 
     cdef size_t rows = img.shape[0]
@@ -111,7 +111,7 @@ cdef void _special_filter(
         _ifft2[cdouble[:, :]](temp_view, fft_img, fft_kernel)
         # slice useful part
         temp_view = fft_img[kernel.shape[0] - 1:rows, kernel.shape[1] - 1:cols]
-        if norm:
+        if range_ is not NULL:
             max_ = min_ = temp_view[0, 0].real
             for i in range(rows - kernel.shape[0] + 1):
                 for j in range(cols - kernel.shape[1] + 1):
@@ -120,10 +120,10 @@ cdef void _special_filter(
                         max_ = out[i, j]
                     if out[i, j] < min_:
                         min_ = out[i, j]
-            ptp = (max_ - min_) / 255.
+            ptp = (max_ - min_) / (range_[1] - range_[0])
             for i in prange(out.shape[0]):
                 for j in range(out.shape[1]):
-                    out[i, j] = (out[i, j] - min_) / ptp
+                    out[i, j] = (out[i, j] - min_) / ptp + range_[0]
         else:
             for i in prange(rows - kernel.shape[0] + 1):
                 for j in range(cols - kernel.shape[1] + 1):
@@ -146,6 +146,7 @@ cdef void _init_guassion_kernel(Kernel kernel, float sigma) noexcept nogil:
     center[0] = (kernel.shape[0] - 1) / 2.
     center[1] = (kernel.shape[1] - 1) / 2.
     cdef double pow_sigma = 2 * cpow(sigma, 2.)
+    cdef double s = 0.
     cdef size_t i, j
     for i in prange(kernel.shape[0], nogil=True):
         for j in range(kernel.shape[1]):
@@ -153,13 +154,17 @@ cdef void _init_guassion_kernel(Kernel kernel, float sigma) noexcept nogil:
                 -(cpow(i - center[0], 2.) + cpow(j - center[1], 2.))
                 / pow_sigma
             ) * NPY_1_PI / pow_sigma
+            s += kernel[i, j]
+    for i in prange(kernel.shape[0], nogil=True):
+        for j in range(kernel.shape[1]):
+            kernel[i, j] /= s
 
 
 cdef void _guassion_filter(
     ImageC1 img,
     double[:, ::1] out,
     size_t* kernel_shape,
-    float sigma
+    float sigma,
 ) noexcept:
     """高斯滤波器。
 
@@ -173,7 +178,7 @@ cdef void _guassion_filter(
     )
     cdef double[:, ::1] kernel = <double[:kernel_shape[0], :kernel_shape[1]]>kernel_data
     _init_guassion_kernel(kernel, sigma)
-    _special_filter[ImageC1](img, out, kernel, 1)
+    _special_filter[ImageC1](img, out, kernel, NULL)
     PyMem_Free(kernel_data)
 
 
@@ -527,8 +532,8 @@ cdef void _canny(
     cdef double[:, ::1] dy = <double[:out.shape[0], :out.shape[1]]>dy_data
     cdef double* temp_data = <double*>PyMem_Malloc(size)
     cdef double[:, ::1] temp = <double[:out.shape[0], :out.shape[1]]>temp_data
-    _special_filter[uint8[:, :]](binary_img, dx, _kernel, 1)
-    _special_filter[uint8[:, :]](binary_img, dy, _kernel.T, 1)
+    _special_filter[uint8[:, :]](binary_img, dx, _kernel, NULL)
+    _special_filter[uint8[:, :]](binary_img, dy, _kernel.T, NULL)
     cdef double pixel, point1, point2, slope
     cdef size_t k, l
     with nogil:
@@ -689,9 +694,33 @@ def special_filter(ImageC1 img, Kernel kernel, bint norm) -> cnp.ndarray:
         sizeof(double) * shape[0] * shape[1]
     )
     cdef double[:, ::1] view = <double[:shape[0], :shape[1]]>data
-    _special_filter[ImageC1](img, view, kernel, norm)
+    cdef double range_[2]
+    range_[0] = 0.
+    range_[1] = 255.
+    _special_filter[ImageC1](img, view, kernel, range_ if norm else NULL)
     cdef cnp.ndarray out = cnp.PyArray_SimpleNewFromData(
         2, &shape[0], cnp.NPY_FLOAT64, <void*>data
+    )
+    cnp.PyArray_ENABLEFLAGS(out, cnp.NPY_ARRAY_OWNDATA)
+    return out
+
+
+def init_guassion_kernel(size_t kernel_rows, size_t kernel_cols, float sigma) -> cnp.ndarray:
+    """初始化特定形状高斯核。
+
+    :param kernel_rows, kernel_cols: 高斯核形状
+    :param sigma: 高斯系数
+    :return: 以 numpy 数组形式返回高斯核
+    """
+
+    cdef Py_ssize_t shape[2]
+    shape[0] = kernel_rows
+    shape[1] = kernel_cols
+    cdef double* kernel_data = <double*>PyMem_Malloc(sizeof(double) * kernel_rows * kernel_cols)
+    cdef double[:, ::1] kernel = <double[:kernel_rows, :kernel_cols]>kernel_data
+    _init_guassion_kernel(kernel, sigma)
+    cdef cnp.ndarray out = <cnp.ndarray>cnp.PyArray_SimpleNewFromData(
+        2, &shape[0], cnp.NPY_FLOAT64, <void*>kernel_data
     )
     cnp.PyArray_ENABLEFLAGS(out, cnp.NPY_ARRAY_OWNDATA)
     return out
@@ -701,7 +730,7 @@ def guassion_filter(
     ImageC1 img,
     size_t kernel_rows,
     size_t kernel_cols,
-    float sigma=5.
+    float sigma=5.,
 ) -> cnp.ndarray:
     """用于外部调用的高斯滤波器。
 

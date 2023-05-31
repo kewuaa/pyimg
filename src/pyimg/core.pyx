@@ -14,6 +14,7 @@ from libc.math cimport (
 )
 from libc.stdlib cimport malloc, free, realloc
 from libc.stdio cimport printf
+from libc.string cimport memcpy, memset
 from cython.parallel cimport prange
 from numpy.math cimport NPY_1_PI
 cimport numpy as cnp
@@ -135,11 +136,12 @@ cdef void _special_filter(
     PyMem_Free(img_data)
 
 
-cdef void _init_guassion_kernel(Kernel kernel, float sigma) noexcept nogil:
+cdef void _init_guassion_kernel(Kernel kernel, float sigma, bint norm) noexcept nogil:
     """初始化一个高斯核。
 
     :param kernel: 需要初始化的高斯核
     :param sigma: 高斯系数
+    :param norm: 是否归一化
     """
 
     cdef float center[2]
@@ -155,9 +157,10 @@ cdef void _init_guassion_kernel(Kernel kernel, float sigma) noexcept nogil:
                 / pow_sigma
             ) * NPY_1_PI / pow_sigma
             s += kernel[i, j]
-    for i in prange(kernel.shape[0], nogil=True):
-        for j in range(kernel.shape[1]):
-            kernel[i, j] /= s
+    if norm:
+        for i in prange(kernel.shape[0], nogil=True):
+            for j in range(kernel.shape[1]):
+                kernel[i, j] /= s
 
 
 cdef void _guassion_filter(
@@ -177,7 +180,7 @@ cdef void _guassion_filter(
         sizeof(double) * kernel_shape[0] * kernel_shape[1]
     )
     cdef double[:, ::1] kernel = <double[:kernel_shape[0], :kernel_shape[1]]>kernel_data
-    _init_guassion_kernel(kernel, sigma)
+    _init_guassion_kernel(kernel, sigma, 1)
     _special_filter[ImageC1](img, out, kernel, NULL)
     PyMem_Free(kernel_data)
 
@@ -212,7 +215,7 @@ cdef void _guassion_low_pass(ImageC1 img, double[:, ::1] out, float sigma):
                 for j in range(img.shape[1]):
                     out[i, j] = img[i, j]
             _img = out
-        _init_guassion_kernel(kernel, sigma)
+        _init_guassion_kernel(kernel, sigma, 0)
         _fft2[double[:, :]](_img, fft_img, temp1)
         _shift(fft_img, temp1)
         for i in prange(img.shape[0]):
@@ -291,8 +294,7 @@ cdef void _median_filter(
             if j == 0:
                 cumulation = 0
                 # 清空柱状图
-                for k in range(256):
-                    histongram[k] = 0
+                memset(histongram, 0, sizeof(size_t) * 256)
                 # 统计每个像素值出现的次数
                 for k in range(kernel_shape[0]):
                     for l in range(kernel_shape[1]):
@@ -363,8 +365,7 @@ cdef void _best_value_filter(
         for j in range(out.shape[1]):
             if j == 0:
                 v = base
-                for k in range(256):
-                    histongram[k] = 0
+                memset(histongram, 0, sizeof(size_t) * 256)
                 for k in range(kernel_shape[0]):
                     for l in range(kernel_shape[1]):
                         pixel = <uint8>img[i + k, l]
@@ -479,8 +480,7 @@ cdef double _otsu_thresholding(ImageC1 img) noexcept nogil:
     cdef double s0 = 0., s1 = 0.
     cdef double classify_var, max_var = 0.
     cdef size_t i, j
-    for i in range(256):
-        histongram[i] = 0
+    memset(histongram, 0, sizeof(size_t) * 256)
     for i in prange(img.shape[0], nogil=True):
         for j in range(img.shape[1]):
             s0 += img[i, j]
@@ -509,16 +509,6 @@ cdef void _canny(
     :param low_threshold, high_threshold: 高低阈值
     """
 
-    cdef uint8* binary_data = <uint8*>PyMem_Malloc(
-        sizeof(uint8) * img.shape[0] * img.shape[1]
-    )
-    cdef uint8[:, ::1] binary_img = \
-        <uint8[:img.shape[0], :img.shape[1]]>binary_data
-    cdef double threshold = _otsu_thresholding[ImageC1](img)
-    cdef size_t i, j
-    for i in range(img.shape[0]):
-        for j in range(img.shape[1]):
-            binary_img[i, j] = 255 if img[i, j] > threshold else 0
     cdef double kernel[3][3]
     cdef double[:, ::1] _kernel
     kernel[0] = [-1, 0, 1]
@@ -532,10 +522,10 @@ cdef void _canny(
     cdef double[:, ::1] dy = <double[:out.shape[0], :out.shape[1]]>dy_data
     cdef double* temp_data = <double*>PyMem_Malloc(size)
     cdef double[:, ::1] temp = <double[:out.shape[0], :out.shape[1]]>temp_data
-    _special_filter[uint8[:, :]](binary_img, dx, _kernel, NULL)
-    _special_filter[uint8[:, :]](binary_img, dy, _kernel.T, NULL)
+    _special_filter[ImageC1](img, dx, _kernel, NULL)
+    _special_filter[ImageC1](img, dy, _kernel.T, NULL)
     cdef double pixel, point1, point2, slope
-    cdef size_t k, l
+    cdef size_t i, j, k, l
     with nogil:
         for i in prange(out.shape[0]):
             for j in range(out.shape[1]):
@@ -551,18 +541,24 @@ cdef void _canny(
                     point2 = out[i + 1, j]
                 else:
                     slope = dy[i, j] / dx[i, j]
-                    if slope > 1.:
-                        point1 = out[i + 1, j] * (1 + (out[i + 1, j + 1] - out[i + 1, j]) / slope)
-                        point2 = out[i - 1, j] * (1 + (out[i - 1, j - 1] - out[i - 1, j]) / slope)
-                    elif slope < -1.:
-                        point1 = out[i - 1, j] * (1 + (out[i - 1, j - 1] - out[i - 1, j]) / slope)
-                        point2 = out[i + 1, j] * (1 + (out[i + 1, j + 1] - out[i + 1, j]) / slope)
-                    elif 0. < slope <= 1.:
-                        point1 = out[i, j + 1] * (1 + (out[i + 1, j + 1] - out[i + 1, j]) * slope)
-                        point2 = out[i, j - 1] * (1 + (out[i - 1, j - 1] - out[i, j - 1]) * slope)
+                    if slope > 0:
+                        point1 = out[i + 1, j + 1]
+                        point2 = out[i - 1, j - 1]
                     else:
-                        point1 = out[i, j - 1] * (1 + (out[i + 1, j - 1] - out[i, j - 1]) * slope)
-                        point2 = out[i, j + 1] * (1 + (out[i - 1, j - 1] - out[i, j + 1]) * slope)
+                        point1 = out[i - 1, j + 1]
+                        point2 = out[i + 1, j - 1]
+                    # if slope > 1.:
+                    #     point1 = out[i + 1, j] * (1 + (out[i + 1, j + 1] - out[i + 1, j]) / slope)
+                    #     point2 = out[i - 1, j] * (1 + (out[i - 1, j - 1] - out[i - 1, j]) / slope)
+                    # elif slope < -1.:
+                    #     point1 = out[i - 1, j] * (1 + (out[i - 1, j - 1] - out[i - 1, j]) / slope)
+                    #     point2 = out[i + 1, j] * (1 + (out[i + 1, j + 1] - out[i + 1, j]) / slope)
+                    # elif 0. < slope <= 1.:
+                    #     point1 = out[i, j + 1] * (1 + (out[i + 1, j + 1] - out[i + 1, j]) * slope)
+                    #     point2 = out[i, j - 1] * (1 + (out[i - 1, j - 1] - out[i, j - 1]) * slope)
+                    # else:
+                    #     point1 = out[i, j - 1] * (1 + (out[i + 1, j - 1] - out[i, j - 1]) * slope)
+                    #     point2 = out[i, j + 1] * (1 + (out[i - 1, j - 1] - out[i, j + 1]) * slope)
                 if point1 > pixel or point2 > pixel:
                     temp[i, j] = 0.
         temp[0, :] = 0.
@@ -589,7 +585,6 @@ cdef void _canny(
     PyMem_Free(temp_data)
     PyMem_Free(dy_data)
     PyMem_Free(dx_data)
-    PyMem_Free(binary_data)
 
 
 cdef (double*, size_t) _hough(
@@ -610,34 +605,30 @@ cdef (double*, size_t) _hough(
     cdef double r_max = hypot(img.shape[0], img.shape[1])
     cdef size_t r_num = <size_t>(2 * r_max / r_step) + 1
     cdef size_t theta_num = <size_t>(pi / theta_step)
-    cdef size_t size = theta_num * r_num
-    cdef size_t* histongram = <size_t*>malloc(sizeof(size_t) * size)
-    cdef size_t* temp = <size_t*>malloc(sizeof(size_t) * size)
+    cdef size_t size = sizeof(size_t) * theta_num * r_num
+    cdef size_t* histongram = <size_t*>malloc(size)
+    cdef size_t* temp = <size_t*>malloc(size)
     cdef size_t v
     cdef size_t preset_line_num = 10
     cdef size_t line_count = 0
-    cdef double theta
+    cdef double theta, r
     cdef double* lines = <double*>malloc(sizeof(double) * preset_line_num * 2)
     cdef size_t i, j, k, l
+    memset(histongram, 0, size)
     for i in prange(theta_num, nogil=True):
         theta = theta_step * i
         for j in range(img.shape[0]):
             for k in range(img.shape[1]):
                 if img[j, k] > 0:
-                    histongram[
-                        i * theta_num
-                        + <size_t>(
-                            (k * csin(theta) + j * ccos(theta) + r_max) / r_step
-                        )
-                    ] += 1
-    for i in range(size):
-        temp[i] = histongram[i]
+                    r = k * csin(theta) + j * ccos(theta)
+                    histongram[i * theta_num + <size_t>((r + r_max) / r_step)] += 1
+    memcpy(temp, histongram, size)
     for i in prange(1, theta_num - 1, nogil=True):
         for j in range(1, r_num - 1):
             v = temp[i * theta_num + j]
             for k in range(3):
-                l = (i + k) * theta_num + j
-                if temp[l] > v or temp[l + 1] > v or temp[l + 2] > v:
+                l = (i - 1 + k) * theta_num + j
+                if temp[l - 1] > v or temp[l] > v or temp[l + 1] > v:
                     histongram[i * theta_num + j] = 0
                     break
     free(temp)
@@ -718,7 +709,7 @@ def init_guassion_kernel(size_t kernel_rows, size_t kernel_cols, float sigma) ->
     shape[1] = kernel_cols
     cdef double* kernel_data = <double*>PyMem_Malloc(sizeof(double) * kernel_rows * kernel_cols)
     cdef double[:, ::1] kernel = <double[:kernel_rows, :kernel_cols]>kernel_data
-    _init_guassion_kernel(kernel, sigma)
+    _init_guassion_kernel(kernel, sigma, 1)
     cdef cnp.ndarray out = <cnp.ndarray>cnp.PyArray_SimpleNewFromData(
         2, &shape[0], cnp.NPY_FLOAT64, <void*>kernel_data
     )

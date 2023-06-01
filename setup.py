@@ -33,6 +33,11 @@ exts = [
         name='pyimg.fft',
         sources=['src\\pyimg\\fft.pyx'],
         include_dirs=include_dirs,
+    ),
+    Extension(
+        name='pyimg.utils',
+        sources=['src\\pyimg\\utils.pyx'],
+        include_dirs=include_dirs,
     )
 ]
 setup(

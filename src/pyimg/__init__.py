@@ -1,6 +1,5 @@
 import os
 os.add_dll_directory(r'D:\Softwares\Program_Files\C\mingw64\bin')
-from . import fft
 from .core import (
     rgb2gray,
     special_filter,
@@ -16,3 +15,6 @@ from .core import (
     canny,
     hough
 )
+from . import fft
+from . import utils
+NoiseType = utils.NoiseType

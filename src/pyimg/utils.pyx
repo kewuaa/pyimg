@@ -3,11 +3,14 @@
 # cython: wraparound=False
 # cython: cdivision=True
 # distutils: language=c
+# distutils: extra_compile_args=-fopenmp
+# distutils: extra_link_args=-fopenmp
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 from cpython.mem cimport PyMem_Malloc
 from libc.stdlib cimport rand, srand, RAND_MAX
 from libc.time cimport time
 from libc.math cimport log as clog, sin as csin, sqrt as csqrt, pi
+from cython.parallel cimport prange
 cimport numpy as cnp
 ctypedef unsigned char uint8
 cdef fused Image:
@@ -79,7 +82,7 @@ cdef void _add_guassion_noise(
     Image out,
     double mean,
     double std
-):
+) noexcept nogil:
     """添加高斯噪声。
 
     :param img: 需要添加噪声的图像
@@ -101,16 +104,16 @@ cdef void _add_guassion_noise(
                 else:
                     out[i, j] = <uint8>pixel
     else:
-        for i in range(img.shape[0]):
-            for j in range(img.shape[1]):
-                for k in range(img.shape[2]):
+        for k in prange(img.shape[2], nogil=True):
+            for i in range(img.shape[0]):
+                for j in range(img.shape[1]):
                     pixel = img[i, j, k] + _gen_guass(mean, std) * 255
                     if pixel > 255.:
-                        out[i, j] = 255
+                        out[i, j, k] = 255
                     elif pixel < 0.:
-                        out[i, j] = 0
+                        out[i, j, k] = 0
                     else:
-                        out[i, j] = <uint8>pixel
+                        out[i, j, k] = <uint8>pixel
 
 
 def add_noise(
@@ -146,14 +149,16 @@ def add_noise(
         view = <uint8[:img.shape[0], :img.shape[1]]>data
     else:
         view = <uint8[:img.shape[0], :img.shape[1], :img.shape[2]]>data
-    if T == NOISE_RANDOM:
-        _add_random_noise[Image](img, view, noise_point_num)
-    elif T == NOISE_SALT:
-        _add_salt_noise[Image](img, view, snr)
-    elif T == NOISE_GUASSION:
-        _add_guassion_noise[Image](img, view, mean, std)
-    else:
-        raise ValueError('got unexpected noise type')
+    with nogil:
+        if T == NOISE_RANDOM:
+            _add_random_noise[Image](img, view, noise_point_num)
+        elif T == NOISE_SALT:
+            _add_salt_noise[Image](img, view, snr)
+        elif T == NOISE_GUASSION:
+            _add_guassion_noise[Image](img, view, mean, std)
+        else:
+            with gil:
+                raise ValueError('got unexpected noise type')
     cdef cnp.ndarray out = <cnp.ndarray>cnp.PyArray_SimpleNewFromData(
         ndim, &img.shape[0], cnp.NPY_UINT8, <void*>data
     )

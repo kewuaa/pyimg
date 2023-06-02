@@ -8,8 +8,16 @@
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 from cpython.mem cimport PyMem_Malloc
 from libc.stdlib cimport rand, srand, RAND_MAX
+from libc.stdio cimport printf
 from libc.time cimport time
-from libc.math cimport log as clog, sin as csin, sqrt as csqrt, pi
+from libc.math cimport (
+    log as clog,
+    sin as csin,
+    cos as ccos,
+    tan as ctan,
+    sqrt as csqrt,
+    pi
+)
 from cython.parallel cimport prange
 cimport numpy as cnp
 ctypedef unsigned char uint8
@@ -164,3 +172,52 @@ def add_noise(
     )
     cnp.PyArray_ENABLEFLAGS(out, cnp.NPY_ARRAY_OWNDATA)
     return out
+
+
+def line2points(
+    double r,
+    double theta,
+    tuple image_shape
+) -> list[size_t, size_t, size_t, size_t]:
+    cdef size_t rows = image_shape[0]
+    cdef size_t cols = image_shape[1]
+    cdef size_t points[4]
+    cdef double x0, y0, x, y, tan_theta
+    cdef size_t num = 0
+    if theta == 0.:
+        points[0] = <size_t>r
+        points[1] = 0
+        points[2] = <size_t>r
+        points[3] = cols - 1
+    elif theta == pi / 2:
+        points[0] = 0
+        points[1] = <size_t>r
+        points[2] = rows - 1
+        points[3] = <size_t>r
+    else:
+        x0 = r * ccos(theta)
+        y0 = r * csin(theta)
+        tan_theta = ctan(theta)
+        x = y0 * tan_theta + x0
+        if 0 <= x <= rows - 1:
+            points[num] = <size_t>x
+            points[num + 1] = 0
+            num += 2
+        x = (y0 - cols + 1) * tan_theta + x0
+        if 0 <= x <= rows - 1:
+            points[num] = <size_t>x
+            points[num + 1] = cols - 1
+            num += 2
+        y = x0 / tan_theta + y0
+        if 0 <= y <= cols - 1:
+            points[num] = 0
+            points[num + 1] = <size_t>y
+            num += 2
+        y = (x0 - rows + 1) / tan_theta + y0
+        if 0 <= y <= cols - 1:
+            points[num] = rows - 1
+            points[num + 1] = <size_t>y
+            num += 2
+        if num != 4:
+            printf('unknow error occured\n')
+    return points

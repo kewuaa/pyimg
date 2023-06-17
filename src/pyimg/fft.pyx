@@ -23,9 +23,9 @@ cdef void _dft(Array1d arr, cdouble[:] out) noexcept nogil:
     cdef size_t N = arr.shape[0]
     cdef cdouble jw = -2j * pi / N
     cdef cdouble W
-    out[:] = 0.
     cdef size_t i, j
     for i in prange(N, nogil=True):
+        out[i] = 0.
         W = jw * i
         for j in range(N):
             out[i] += cexp(W * j) * arr[j]
@@ -41,9 +41,9 @@ cdef void _idft(Array1d arr, cdouble[:] out) noexcept nogil:
     cdef size_t N = arr.shape[0]
     cdef cdouble jw = 2j * pi / N
     cdef cdouble W
-    out[:] = 0.
     cdef size_t i, j
     for i in prange(N, nogil=True):
+        out[i] = 0.
         W = jw * i
         for j in range(N):
             out[i] += cexp(W * j) * arr[j]

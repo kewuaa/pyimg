@@ -20,8 +20,6 @@ class build(build_ext):
         super().build_extensions()
 
 
-environ['cc'] = 'gcc'
-environ['cxx'] = 'g++'
 include_dirs = environ['include'].split(';')
 exts = [
     Extension(

@@ -1,2 +1,2 @@
 [tool.jedi]
-venv = 'ai'
+venv = 'cv'

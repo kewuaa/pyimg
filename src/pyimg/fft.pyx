@@ -3,8 +3,8 @@
 # cython: wraparound=False
 # cython: cdivision=True
 # distutils: language=c
-# distutils: extra_link_args=-fopenmp
-# distutils: extra_compile_args=-fopenmp
+# distutils: extra_link_args=-fopenmp-extensions
+# distutils: extra_compile_args=-fopenmp-extensions
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 from cpython cimport PyMem_Malloc, PyMem_Free
 from libc.complex cimport cexp

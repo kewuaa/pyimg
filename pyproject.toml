@@ -1,2 +1,18 @@
-[tool.jedi]
+[project]
+name = "pyimg"
+version = "0.1.0"
+authors = [
+    {name = "kewuaa"}
+]
+description = "digital image processing library made by cython"
+dependencies = []
+readme = "README.md"
+
+[tool.setuptools]
+zip-safe = false
+packages = {find = {where = ["./src"], exclude = ["main"]}}
+package-dir = {"" = "./src"}
+exclude-package-data = {"*" = ["*.c"]}
+
+[tool.pyright]
 venv = 'cv'

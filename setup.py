@@ -1,9 +1,9 @@
-from os import environ
+import sys
 from distutils.unixccompiler import UnixCCompiler
+from os import environ
 
-from setuptools import setup, Extension
+from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
-from Cython.Build import cythonize
 
 
 class build(build_ext):
@@ -19,28 +19,30 @@ class build(build_ext):
                     ext.undef_macros = ['_DEBUG']
         super().build_extensions()
 
-
+use_cython = "--use-cython" in sys.argv
 include_dirs = environ['include'].split(';')
+suffix = "pyx" if use_cython else "c"
 exts = [
     Extension(
         name='pyimg.core',
-        sources=['src\\pyimg\\core.pyx'],
+        sources=['src\\pyimg\\core.' + suffix],
         include_dirs=include_dirs,
     ),
     Extension(
         name='pyimg.fft',
-        sources=['src\\pyimg\\fft.pyx'],
+        sources=['src\\pyimg\\fft.' + suffix],
         include_dirs=include_dirs,
     ),
     Extension(
         name='pyimg.utils',
-        sources=['src\\pyimg\\utils.pyx'],
+        sources=['src\\pyimg\\utils.' + suffix],
         include_dirs=include_dirs,
     )
 ]
+if use_cython:
+    from Cython.Build import cythonize
+    exts = cythonize(exts)
 setup(
-    ext_modules=cythonize(exts, language_level=3),
-    zip_safe=False,
-    package_dir={'pyimg': 'src\\pyimg'},
+    ext_modules=exts,
     cmdclass={'build_ext': build},
 )

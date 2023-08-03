@@ -19,7 +19,11 @@ class build(build_ext):
                     ext.undef_macros = ['_DEBUG']
         super().build_extensions()
 
-use_cython = "--use-cython" in sys.argv
+if "--use-cython" in sys.argv:
+    sys.argv.remove("--use-cython")
+    use_cython = True
+else:
+    use_cython = False
 include_dirs = environ['include'].split(';')
 suffix = "pyx" if use_cython else "c"
 exts = [

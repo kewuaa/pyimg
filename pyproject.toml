@@ -10,9 +10,19 @@ readme = "README.md"
 
 [tool.setuptools]
 zip-safe = false
-packages = {find = {where = ["./src"], exclude = ["main"]}}
-package-dir = {"" = "./src"}
-exclude-package-data = {"*" = ["*.c"]}
+
+[tool.setuptools.package-dir]
+"" = "./src"
+
+[tool.setuptools.packages.find]
+where = ["./src"]
+exclude = ["main"]
+
+[tool.setuptools.package-data]
+pyimg = ["*.c"]
+
+[tool.setuptools.exclude-package-data]
+pyimg = ["*.c"]
 
 [tool.pyright]
 venv = 'cv'

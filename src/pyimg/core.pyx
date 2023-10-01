@@ -3,8 +3,8 @@
 # cython: wraparound=False
 # cython: cdivision=True
 # distutils: language=c
-# distutils: extra_compile_args=-fopenmp-extensions
-# distutils: extra_link_args=-fopenmp-extensions
+# distutils: extra_compile_args=-fopenmp
+# distutils: extra_link_args=-fopenmp
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 from cpython cimport PyMem_Malloc, PyMem_Free
 from libc.math cimport (
@@ -20,11 +20,15 @@ from numpy.math cimport NPY_1_PI
 cimport numpy as cnp
 
 from .fft cimport cdouble, _fft2, _ifft2, _shift
+
+
 cpdef enum FilterType:
     FILTER_MEAN
     FILTER_MEDIAN
     FILTER_MIN
     FILTER_MAX
+
+
 cpdef enum MorphologyType:
     MORPH_ERODE
     MORPH_DILATE
@@ -32,6 +36,8 @@ cpdef enum MorphologyType:
     MORPH_CLOSE
     MORPH_TOPHAT
     MORPH_BLACKHAT
+
+
 cpdef enum ThresholdType:
     THRESHOLD_GLOBAL
     THRESHOLD_OTSU

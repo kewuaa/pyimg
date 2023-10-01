@@ -1,5 +1,5 @@
 [project-build]
-command=python <root>/setup.py build_ext
+command=python <root>/setup.py build_ext --use-cython
 cwd=<root>
 
 [file-build]

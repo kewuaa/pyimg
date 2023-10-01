@@ -3,8 +3,8 @@
 # cython: wraparound=False
 # cython: cdivision=True
 # distutils: language=c
-# distutils: extra_compile_args=-fopenmp-extensions
-# distutils: extra_link_args=-fopenmp-extensions
+# distutils: extra_compile_args=-fopenmp
+# distutils: extra_link_args=-fopenmp
 # distutils: define_macros=NPY_NO_DEPRECATED_API=NPY_1_7_API_VERSION
 from cpython.mem cimport PyMem_Malloc
 from libc.stdlib cimport rand, srand, RAND_MAX
@@ -20,15 +20,22 @@ from libc.math cimport (
 )
 from cython.parallel cimport prange
 cimport numpy as cnp
+
+cdef double RAND_MAX_ = RAND_MAX + 1
+
+
 ctypedef unsigned char uint8
+
+
 cdef fused Image:
     uint8[:, :]
     uint8[:, :, :]
+
+
 cpdef enum NoiseType:
     NOISE_RANDOM
     NOISE_SALT
     NOISE_GUASSION
-cdef double RAND_MAX_ = RAND_MAX + 1
 
 
 cdef double _gen_guass(double mean, double std) noexcept nogil:

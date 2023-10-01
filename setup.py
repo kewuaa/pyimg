@@ -4,6 +4,15 @@ from os import environ
 
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
+import numpy as np
+
+include_dirs = [
+    environ['include'],
+    np.get_include()
+]
+library_dirs = [
+    environ['lib']
+]
 
 
 class build(build_ext):
@@ -16,31 +25,33 @@ class build(build_ext):
                     f'{self.compiler.cc} -O3 -Wall'
                 )
                 for ext in self.extensions:
-                    ext.undef_macros = ['_DEBUG']
+                    ext.undef_macros.append("_DEBUG")
+                    if "-fopenmp" in ext.extra_compile_args:
+                        ext.libraries.append("libomp")
+        for ext in self.extensions:
+            ext.include_dirs = include_dirs
+            ext.library_dirs = library_dirs
         super().build_extensions()
+
 
 if "--use-cython" in sys.argv:
     sys.argv.remove("--use-cython")
     use_cython = True
 else:
     use_cython = False
-include_dirs = environ['include'].split(';')
 suffix = "pyx" if use_cython else "c"
 exts = [
     Extension(
         name='pyimg.core',
         sources=['src\\pyimg\\core.' + suffix],
-        include_dirs=include_dirs,
     ),
     Extension(
         name='pyimg.fft',
         sources=['src\\pyimg\\fft.' + suffix],
-        include_dirs=include_dirs,
     ),
     Extension(
         name='pyimg.utils',
         sources=['src\\pyimg\\utils.' + suffix],
-        include_dirs=include_dirs,
     )
 ]
 if use_cython:
